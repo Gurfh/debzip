@@ -1,0 +1,5 @@
+flask==3.0.3
+requests==2.32.3
+redis==5.0.8
+flask-limiter==3.8.0
+gunicorn==22.0.0

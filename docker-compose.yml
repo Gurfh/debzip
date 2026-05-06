@@ -1,0 +1,119 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: debzip-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+  gateway:
+    build: ./gateway
+    container_name: debzip-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      WORKER_OLDOLDSTABLE: http://worker-oldoldstable:9000
+      WORKER_OLDSTABLE: http://worker-oldstable:9000
+      WORKER_STABLE: http://worker-stable:9000
+      WORKER_TESTING: http://worker-testing:9000
+      WORKER_SID: http://worker-sid:9000
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      - redis
+      - worker-oldoldstable
+      - worker-oldstable
+      - worker-stable
+      - worker-testing
+      - worker-sid
+    restart: unless-stopped
+
+  worker-oldoldstable:
+    build:
+      context: ./worker
+      args:
+        DEBIAN_RELEASE: oldoldstable
+    environment:
+      RELEASE_NAME: oldoldstable
+      REDIS_URL: redis://redis:6379/0
+      GPG_KEY_ID: ${GPG_KEY_ID:-DebZip Signing Key}
+      MAX_PACKAGE_COUNT: ${MAX_PACKAGE_COUNT:-500}
+      MAX_TOTAL_BYTES: ${MAX_TOTAL_BYTES:-2147483648}
+    volumes:
+      - ./cache:/cache
+      - ./keys:/keys:ro
+    depends_on: [redis]
+    restart: unless-stopped
+
+  worker-oldstable:
+    build:
+      context: ./worker
+      args:
+        DEBIAN_RELEASE: oldstable
+    environment:
+      RELEASE_NAME: oldstable
+      REDIS_URL: redis://redis:6379/0
+      GPG_KEY_ID: ${GPG_KEY_ID:-DebZip Signing Key}
+      MAX_PACKAGE_COUNT: ${MAX_PACKAGE_COUNT:-500}
+      MAX_TOTAL_BYTES: ${MAX_TOTAL_BYTES:-2147483648}
+    volumes:
+      - ./cache:/cache
+      - ./keys:/keys:ro
+    depends_on: [redis]
+    restart: unless-stopped
+
+  worker-stable:
+    build:
+      context: ./worker
+      args:
+        DEBIAN_RELEASE: stable
+    environment:
+      RELEASE_NAME: stable
+      REDIS_URL: redis://redis:6379/0
+      GPG_KEY_ID: ${GPG_KEY_ID:-DebZip Signing Key}
+      MAX_PACKAGE_COUNT: ${MAX_PACKAGE_COUNT:-500}
+      MAX_TOTAL_BYTES: ${MAX_TOTAL_BYTES:-2147483648}
+    volumes:
+      - ./cache:/cache
+      - ./keys:/keys:ro
+    depends_on: [redis]
+    restart: unless-stopped
+
+  worker-testing:
+    build:
+      context: ./worker
+      args:
+        DEBIAN_RELEASE: testing
+    environment:
+      RELEASE_NAME: testing
+      REDIS_URL: redis://redis:6379/0
+      GPG_KEY_ID: ${GPG_KEY_ID:-DebZip Signing Key}
+      MAX_PACKAGE_COUNT: ${MAX_PACKAGE_COUNT:-500}
+      MAX_TOTAL_BYTES: ${MAX_TOTAL_BYTES:-2147483648}
+    volumes:
+      - ./cache:/cache
+      - ./keys:/keys:ro
+    depends_on: [redis]
+    restart: unless-stopped
+
+  worker-sid:
+    build:
+      context: ./worker
+      args:
+        DEBIAN_RELEASE: sid
+    environment:
+      RELEASE_NAME: sid
+      REDIS_URL: redis://redis:6379/0
+      GPG_KEY_ID: ${GPG_KEY_ID:-DebZip Signing Key}
+      MAX_PACKAGE_COUNT: ${MAX_PACKAGE_COUNT:-500}
+      MAX_TOTAL_BYTES: ${MAX_TOTAL_BYTES:-2147483648}
+    volumes:
+      - ./cache:/cache
+      - ./keys:/keys:ro
+    depends_on: [redis]
+    restart: unless-stopped
+
+volumes:
+  redis-data:

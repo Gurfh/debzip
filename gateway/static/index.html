@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DebZip — Debian Dependency ZIP Downloader</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; max-width: 980px; margin: 40px auto; padding: 0 18px; line-height: 1.45; }
+    h1 { margin-bottom: 0; }
+    .muted { color: #666; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 22px 0; }
+    label { display: block; font-weight: 700; margin-bottom: 6px; }
+    select, input, button { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid #999; font-size: 1rem; }
+    button { cursor: pointer; font-weight: 700; }
+    button.primary { background: #a80030; color: white; border-color: #a80030; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .card { border: 1px solid #ccc; border-radius: 14px; padding: 16px; margin-top: 18px; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    progress { width: 100%; height: 22px; }
+    .results { border: 1px solid #ccc; border-radius: 8px; margin-top: 4px; max-height: 260px; overflow: auto; }
+    .result { padding: 8px 10px; border-bottom: 1px solid #ddd; cursor: pointer; }
+    .result:hover { background: rgba(168,0,48,.12); }
+    .pkg-name { font-weight: 700; }
+    .small { font-size: .88rem; }
+    pre { overflow: auto; background: rgba(127,127,127,.12); padding: 12px; border-radius: 8px; }
+    a.button { display:none; padding: 10px 14px; border-radius: 8px; background: #0078d4; color: white; text-decoration: none; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>DebZip</h1>
+  <p class="muted">Create a ZIP containing a Debian package and its dependency packages.</p>
+
+  <div class="grid">
+    <div>
+      <label for="release">Debian release</label>
+      <select id="release">
+        <option value="oldoldstable">oldoldstable</option>
+        <option value="oldstable">oldstable</option>
+        <option value="stable" selected>stable</option>
+        <option value="testing">testing</option>
+        <option value="sid">sid</option>
+      </select>
+    </div>
+    <div>
+      <label for="arch">Architecture</label>
+      <select id="arch">
+        <option value="amd64" selected>amd64</option>
+        <option value="i386">i386</option>
+        <option value="arm64">arm64</option>
+        <option value="armhf">armhf</option>
+        <option value="armel">armel</option>
+        <option value="ppc64el">ppc64el</option>
+        <option value="s390x">s390x</option>
+        <option value="riscv64">riscv64</option>
+      </select>
+    </div>
+  </div>
+
+  <div>
+    <label for="package">Package search</label>
+    <input id="package" autocomplete="off" placeholder="Type at least 2 characters, e.g. curl">
+    <div id="results" class="results" style="display:none"></div>
+  </div>
+
+  <div class="row" style="margin-top:18px">
+    <button id="previewBtn">Preview ZIP size</button>
+    <button id="jobBtn" class="primary" disabled>Create ZIP job</button>
+  </div>
+
+  <div id="preview" class="card" style="display:none"></div>
+
+  <div id="job" class="card" style="display:none">
+    <h2>Job status</h2>
+    <p id="jobText">Waiting...</p>
+    <progress id="progress" value="0" max="100"></progress>
+    <p><a id="download" class="button">Download ZIP</a></p>
+  </div>
+
+<script>
+const releaseEl = document.querySelector('#release');
+const archEl = document.querySelector('#arch');
+const packageEl = document.querySelector('#package');
+const resultsEl = document.querySelector('#results');
+const previewEl = document.querySelector('#preview');
+const previewBtn = document.querySelector('#previewBtn');
+const jobBtn = document.querySelector('#jobBtn');
+const jobEl = document.querySelector('#job');
+const jobText = document.querySelector('#jobText');
+const progress = document.querySelector('#progress');
+const download = document.querySelector('#download');
+let selectedPackage = '';
+let searchTimer = null;
+
+function esc(s) { return String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+
+packageEl.addEventListener('input', () => {
+  selectedPackage = packageEl.value.trim();
+  jobBtn.disabled = true;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(searchPackages, 250);
+});
+
+async function searchPackages() {
+  const q = packageEl.value.trim();
+  if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+  const url = `/api/search?release=${releaseEl.value}&arch=${archEl.value}&q=${encodeURIComponent(q)}`;
+  const res = await fetch(url);
+  if (!res.ok) { resultsEl.style.display = 'none'; return; }
+  const data = await res.json();
+  resultsEl.innerHTML = data.map(p => `
+    <div class="result" data-name="${esc(p.name)}">
+      <div class="pkg-name">${esc(p.name)}</div>
+      <div class="small">${esc(p.version || '')} — ${esc(p.description || '')}</div>
+    </div>
+  `).join('');
+  resultsEl.style.display = data.length ? 'block' : 'none';
+  document.querySelectorAll('.result').forEach(el => el.onclick = () => {
+    packageEl.value = el.dataset.name;
+    selectedPackage = el.dataset.name;
+    resultsEl.style.display = 'none';
+  });
+}
+
+previewBtn.onclick = async () => {
+  selectedPackage = packageEl.value.trim();
+  previewEl.style.display = 'block';
+  previewEl.innerHTML = '<p>Resolving dependencies...</p>';
+  jobBtn.disabled = true;
+  const url = `/api/preview?release=${releaseEl.value}&arch=${archEl.value}&package=${encodeURIComponent(selectedPackage)}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok) { previewEl.innerHTML = `<p><strong>Error:</strong> ${esc(data.description || JSON.stringify(data))}</p>`; return; }
+  previewEl.innerHTML = `
+    <h2>Preview</h2>
+    <p><strong>${esc(data.package)}</strong> for <strong>${esc(data.release)}</strong>/<strong>${esc(data.architecture)}</strong></p>
+    <ul>
+      <li>Packages: ${data.package_count}</li>
+      <li>Estimated download size: ${esc(data.download_size_human)}</li>
+      <li>Cached ZIP available: ${data.cached ? 'yes' : 'no'}</li>
+    </ul>
+    <details><summary>Package files</summary><pre>${esc(data.packages.map(p => `${p.filename} ${p.size}`).join('\n'))}</pre></details>
+  `;
+  jobBtn.disabled = false;
+};
+
+jobBtn.onclick = async () => {
+  jobEl.style.display = 'block';
+  download.style.display = 'none';
+  progress.value = 0;
+  jobText.textContent = 'Creating job...';
+  const res = await fetch('/api/jobs', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({release: releaseEl.value, architecture: archEl.value, package: selectedPackage})
+  });
+  const data = await res.json();
+  if (!res.ok) { jobText.textContent = `Error: ${data.description || JSON.stringify(data)}`; return; }
+  pollJob(data.job_id);
+};
+
+async function pollJob(jobId) {
+  const timer = setInterval(async () => {
+    const res = await fetch(`/api/jobs/${jobId}?release=${releaseEl.value}`);
+    const data = await res.json();
+    progress.value = data.progress || 0;
+    jobText.textContent = `${data.status}: ${data.message || ''}`;
+    if (data.status === 'finished') {
+      clearInterval(timer);
+      progress.value = 100;
+      download.href = `/api/jobs/${jobId}/download?release=${releaseEl.value}`;
+      download.style.display = 'inline-block';
+    }
+    if (data.status === 'failed') clearInterval(timer);
+  }, 2000);
+}
+</script>
+</body>
+</html>

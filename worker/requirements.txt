@@ -1,0 +1,5 @@
+# Debian packages are used in the worker image for Python dependencies.
+# This file is kept for documentation and optional local development.
+flask
+redis
+requests
